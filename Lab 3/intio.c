@@ -32,7 +32,7 @@
    example also includes dsk6713_aic23.h because it uses the 
    AIC23 codec module (audio interface). */
 #include "dsk6713.h"
-#include "dsk6713_aic23.h"
+#include "dsk6713_aic23.h" 
 
 // math library (trig functions)
 #include <math.h>
