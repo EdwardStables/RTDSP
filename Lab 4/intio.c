@@ -57,8 +57,13 @@ DSK6713_AIC23_Config Config = { \
 DSK6713_AIC23_CodecHandle H_Codec;
 
 //Global variables for value tracking and removing repeated calculations
-double x[M];
+double x[M]; //For normal approaches 
 int write_adr = 0;
+
+double y[3*M]; 
+int double_adr_1 = 0; 
+int double_adr_2 = M; 
+int double_adr_3 = 2*M;
 
  /******************************* Function prototypes ********************************/
 void init_hardware(void);     
@@ -70,6 +75,7 @@ void non_circ_addressing(void);
 void circ_addressing(void);
 void non_circ_symmetric_addressing(void);
 void circ_symmetric_addressing(void);
+void circ_symmetric_addressing_optimised(void);
 
 /********************************** Main routine ************************************/
 void main(){      
@@ -131,7 +137,8 @@ void ISR_AIC(void)
 	//non_circ_addressing();
 	//circ_addressing();
 	//non_circ_symmetric_addressing();
-	circ_symmetric_addressing();
+	//circ_symmetric_addressing();
+	circ_symmetric_addressing_optimised();
 }
 
 void non_circ_symmetric_addressing(void)
@@ -157,6 +164,37 @@ void non_circ_symmetric_addressing(void)
 	
 	mono_write_16Bit(filtered);
 }
+
+void circ_symmetric_addressing_optimised(void)
+{
+	int halfM = floor(M/2);
+	double filtered = 0;
+	int i;
+	
+	double val = mono_read_16Bit();
+	
+	y[double_adr_1] = val;
+	y[double_adr_2] = val; 
+	y[double_adr_3] = val;
+	
+	for(i = 0; i < halfM; i++){		
+		filtered += (y[double_adr_2 - i] + y[double_adr_2 + 1 + i]) * filter[i];
+	}
+	
+	filtered += y[double_adr_2 - halfM] * filter[halfM];
+	
+	mono_write_16Bit(filtered);
+	
+	double_adr_1++;
+	double_adr_2++;
+	double_adr_3++;
+	if(double_adr_1 == M){
+		double_adr_1 = 0;
+		double_adr_2 = M;
+		double_adr_3 = 2*M;
+	}
+}
+
 void circ_symmetric_addressing(void)
 {
 	int halfM = floor(M/2);
@@ -168,7 +206,6 @@ void circ_symmetric_addressing(void)
 	offset2 = write_adr;
 	
 	x[write_adr] = mono_read_16Bit();
-	
 	
 	for(i = 0; i < halfM; i++){	
 		int adr1 = offset1 - i;
@@ -183,7 +220,7 @@ void circ_symmetric_addressing(void)
 			adr2 = offset2 + 1 + i;
 		}
 		
-		filtered += (x[adr1] + x[adr2]) * filter[i]; 
+		filtered += (x[adr1] + x[adr2])* filter[i];
 	}
 	
 	
