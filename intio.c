@@ -11,9 +11,6 @@
  				Updated for use on 6713 DSK by Danny Harvey: May-Aug 2006
 				Updated for CCS V4 Sept 10
 **************************** Pre-processor statements ******************************/
-
-#define M 283 //elements in filter
-
 #include <stdlib.h>
 // math library (trig functions)
 #include <math.h>
@@ -25,8 +22,13 @@
    AIC23 codec module (audio interface). */
 #include "dsk6713.h"
 #include "dsk6713_aic23.h"
-#include "FIRCoeffs.txt"
+#include "2_coef.txt"
+//#include "4_coef.txt"
+//#include "6_coef.txt"
+//#include "8_coef.txt"
+//#include "10_coef.txt"
 
+#define N (sizeof(a)/sizeof(a[0]) - 1)
 
 // Some functions to help with writing/reading the audio ports when using interrupts.
 #include <helper_functions_ISR.h>
@@ -57,27 +59,41 @@ DSK6713_AIC23_Config Config = { \
 DSK6713_AIC23_CodecHandle H_Codec;
 
 //Global variables for value tracking and removing repeated calculations
-double x[M];
-int write_adr = 0;
 
+//Tustin IIR filter
+double prev_output_scale = 0;
+double prev_input = 0;
+
+
+//Direct form II
+//int N = sizeof(a)/sizeof(a[0]) - 1;
+double delay_line[N];  
+//double delay_line[] = {0, 0, 0, 0};
  /******************************* Function prototypes ********************************/
 void init_hardware(void);     
 void init_HWI(void);
 
 //Written in lab     
 void ISR_AIC(void);          
-void non_circ_addressing(void);
-void circ_addressing(void);
-void non_circ_symmetric_addressing(void);
-void circ_symmetric_addressing(void);
+double RC_IIR(double sample);
+double direct_form_2(double sample);
+double direct_form_2_transposed(double sample);
 
 /********************************** Main routine ************************************/
 void main(){      
+  int i;
+  
+  for(i = 0; i < N; i++){
+  	delay_line[i] = 0;
+  }
+  
   // initialize board and the audio port
   init_hardware();
 	
   /* initialize hardware interrupts */
   init_HWI();
+  
+  
   /* loop indefinitely, waiting for interrupts */  					
   while(1) 
   {};
@@ -122,127 +138,83 @@ void init_HWI(void)
 	IRQ_map(IRQ_EVT_XINT1,4);		// Maps an event to a physical interrupt
 	IRQ_enable(IRQ_EVT_XINT1);		// Enables the event
 	IRQ_globalEnable();				// Globally enables interrupts
-
 } 
 
 /******************** WRITE YOUR INTERRUPT SERVICE ROUTINE HERE***********************/  
 void ISR_AIC(void)
-{
-	//non_circ_addressing();
-	//circ_addressing();
-	//non_circ_symmetric_addressing();
-	circ_symmetric_addressing();
+{	
+	double sample, output;
+	
+	sample = mono_read_16Bit();
+	
+	output = RC_IIR(sample);
+	//output = direct_form_2(sample);
+	//output = direct_form_2_transposed(sample);
+	
+	mono_write_16Bit(output);
 }
 
-void non_circ_symmetric_addressing(void)
-{
-	int halfM = floor(M/2);
-	int odd = M % 2;
-	short filtered = 0;
+double direct_form_2_transposed(double x){
+	double y, var;
 	int i;
-	double var = mono_read_16Bit();
 	
-	for(i = M-1; i > 0; i--){
-		x[i]=x[i-1];
+	y = (x * b[0]) + delay_line[N-1];
+	
+	for(i = N-1; i > 0; i--)
+	{
+		delay_line[i] = delay_line[i-1];
+		var = (b[N-i] * x) - (a[N-i] * y);
+		delay_line[i] += var;
 	}
-	
-	x[0] = var;
-
-	for(i = 0; i < halfM; i++){	
-		filtered += (x[i] + x[M-i-1]) * filter[i];
-	}
-	if(odd){
-		filtered += x[halfM] * filter[halfM];
-	}
-	
-	mono_write_16Bit(filtered);
-}
-void circ_symmetric_addressing(void)
-{
-	int halfM = floor(M/2);
-	int odd = M % 2;
-	double filtered = 0;
-	int offset1, offset2, i;
-	
-	offset1 = write_adr;
-	offset2 = write_adr;
-	
-	x[write_adr] = mono_read_16Bit();
-	
-	
-	for(i = 0; i < halfM; i++){	
-		int adr1 = offset1 - i;
-		int adr2 = offset2 + 1 + i;
-		
-		if(adr1 < 0){
-			offset1 += M;
-			adr1 = offset1 - i;
-		}
-		if(adr2 >= M){
-			offset2 -= M;
-			adr2 = offset2 + 1 + i;
-		}
-		
-		filtered += (x[adr1] + x[adr2]) * filter[i]; 
-	}
-	
-	
-	if(odd){
-		offset1 = write_adr - halfM;
-		if(offset1 < 0){
-			filtered += x[offset1 + M] * filter[halfM];
-		}else{
-			filtered += x[offset1] * filter[halfM];
-		}
-	}
-	
-	mono_write_16Bit(filtered);
-	
-	write_adr++;
-	if(write_adr == M){
-		write_adr = 0;
-	}
-	
+	delay_line[0] = (b[N] * x) - (a[N] * y);
+	return y;
 }
 
-void circ_addressing(void)
-{
-	short filtered = 0;
-	int offset, i;
+double direct_form_2(double x){
 	
-	write_adr++;
-	write_adr = write_adr % M;
-	offset = write_adr;
-	x[write_adr] = mono_read_16Bit();
-	
-	for(i = 0; i < M; i++){
-		int temp = i + offset;
-		if(temp >= M){
-			offset -= M;
-			temp = i + offset;
-		}
-		filtered += x[temp] * filter[i];
-	}
-	
-	mono_write_16Bit(filtered);
-	
-	
-}
-
-void non_circ_addressing(void){
-	double filtered = 0;
+	double y, var;//,x;
 	int i;
-	double val = mono_read_16Bit();
-	for(i = M-1; i > 0; i--){
-		x[i]=x[i-1];
+	
+	//x = sample;
+	for(i = 0; i < N; i++)
+	{	
+		var = delay_line[i] * a[i+1];
+		x -= var;
 	}
 	
-	x[0] = val; 
+	y = x * b[0];
 	
-	for(i = 0; i < M; i++){
-		filtered += x[i] * filter[i];
+	for(i = 0; i < N; i++)
+	{
+		var = delay_line[i] * b[i+1]; 
+		y += var;
 	}
 	
-	mono_write_16Bit(filtered);
 	
+	for(i = N - 1; i > 0; i--)
+	{
+		delay_line[i] = delay_line[i-1];
+	}
+	
+	delay_line[0] = x;
+	return y;
+	
+}
+
+double RC_IIR(double input)
+{
+	/*
+	 * implements: y(n) = (x(n) + x(n-1) +15y(n-1))/17
+	 * RC network with R = 1k, C = 1u
+	 * Measured 5RC = 6.5ms -> RC = 1.3ms
+	 */
+	double output;
+		
+	output = input + prev_input + prev_output_scale;
+	prev_input = input;
+	output = output / 17;
+	
+	prev_output_scale = 15 * output;
+	
+	return output;
 }
