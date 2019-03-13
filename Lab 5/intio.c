@@ -61,7 +61,7 @@ DSK6713_AIC23_CodecHandle H_Codec;
 //Global variables for value tracking and removing repeated calculations
 
 //Tustin IIR filter
-double prev_output_scale = 0;
+double prev_output = 0;
 double prev_input = 0;
 
 
@@ -146,10 +146,10 @@ void ISR_AIC(void)
 	double sample, output;
 	
 	sample = mono_read_16Bit();
-	
-	output = RC_IIR(sample);
+	//output = sample;
+	//output = RC_IIR(sample);
 	//output = direct_form_2(sample);
-	//output = direct_form_2_transposed(sample);
+	output = direct_form_2_transposed(sample);
 	
 	mono_write_16Bit(output);
 }
@@ -210,11 +210,11 @@ double RC_IIR(double input)
 	 */
 	double output;
 		
-	output = input + prev_input + prev_output_scale;
+	output = input + prev_input + (15*prev_output);
 	prev_input = input;
 	output = output / 17;
 	
-	prev_output_scale = 15 * output;
+	prev_output = output;
 	
 	return output;
 }
